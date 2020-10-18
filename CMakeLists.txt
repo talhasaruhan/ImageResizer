@@ -1,0 +1,23 @@
+﻿cmake_minimum_required (VERSION 3.8)
+
+project ("ImageResizer")
+
+set (CMAKE_CXX_STANDARD 17)
+set (BUILD_opencv_python3 OFF CACHE BOOL "" FORCE)
+set (BUILD_opencv_python2 OFF CACHE BOOL "" FORCE)
+set (BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set (BUILD_opencv_python_tests OFF CACHE BOOL "" FORCE)
+set (BUILD_opencv_python_bindings_generator OFF CACHE BOOL "" FORCE)
+set (BUILD_PERF_TESTS OFF CACHE BOOL "" FORCE)
+set (BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set (CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE)
+set (BUILD_JAVA CACHE BOOL "" FORCE)
+set (BUILD_opencv_java_bindings_generator CACHE BOOL "" FORCE)
+set (BUILD_opencv_apps CACHE BOOL "" FORCE)
+set (BUILD_opencv_video CACHE BOOL "" FORCE)
+set (BUILD_opencv_videoio CACHE BOOL "" FORCE)
+set (WITH_FFMPEG CACHE BOOL "" FORCE)
+set (VIDEOIO_ENABLE_PLUGINSOFF CACHE BOOL "" FORCE)
+set (VIDEOIO_ENABLE_STRICT_PLUGIN_CHECK CACHE BOOL "" FORCE)
+
+add_subdirectory ("ImageResizer")

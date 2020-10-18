@@ -1,0 +1,8 @@
+build
+.clangd
+.vs
+.ccls-cache
+.clang-format
+compile_commands.json
+CMakeSettings.json
+ImageResizer/dependencies/OpenCV
