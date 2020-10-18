@@ -6,6 +6,7 @@
 #include <cassert>
 #include <iostream>
 #include <vector>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <filesystem>
@@ -48,10 +49,11 @@ enum class EOutputFormat
 
 struct SProgramOptions
 {
+	uint32_t number_of_input_entries{0};
 	EOutputFormat output_format{EOutputFormat::INPLACE};
 	std::string output_folder{"resized_images"}; // Relevant only if output_format is not INPLACE
 	uint32_t recursive{0};
-	uint32_t verbose{0}; // 0: no logs, 1: errors, 2: errors, warnings and info
+	uint32_t verbose{1}; // 0: no logs, 1: errors, 2: errors, warnings and info
 	// keep_aspect_ratio: If 1, then original aspect ratios are kept and
 	// images are fit into the target frame with a black background
 	uint32_t keep_aspect_ratio{0};
@@ -133,23 +135,62 @@ cv::Size FitAspectRatio(int org_width, int org_height, int target_width, int tar
 	return real_size;
 }
 
-std::string MakeOutputPath(const std::string_view path, EOutputFormat output_format)
+std::string replace_str(std::string & str, const std::string& from, const std::string& to)
 {
-	std::string output_path;
-
-	switch (output_format)
+	while(str.find(from) != std::string::npos)
 	{
-	case EOutputFormat::FLAT_WITH_PREFIXES:
-		break;
-	case EOutputFormat::RECREATE_FOLDER_STRUCTURE:
-		break;
-	case EOutputFormat::INPLACE:
-	default:
-		output_path = path;
-		break;
+		str.replace(str.find(from), from.length(), to);
+	}
+	return str;
+}
+
+std::string MakeOutputPath(const std::string_view path, EOutputFormat output_format,
+		uint32_t number_of_input_entries)
+{
+	if (output_format == EOutputFormat::FLAT_WITH_PREFIXES)
+	{
+		std::string separator = std::string(1, (char)fs::path::preferred_separator);
+		if (number_of_input_entries == 1)
+		{
+			fs::path output_path(path);
+
+			if (output_path.has_parent_path())
+			{
+				output_path.make_preferred();
+				std::string output_path_str = output_path.string();
+
+				output_path_str = output_path_str.substr(
+						output_path_str.find((char)fs::path::preferred_separator)+1);
+				replace_str(output_path_str, separator, "_@_");
+
+				return output_path_str;
+			}
+			else
+			{
+				return output_path.filename().string();
+			}
+		}
+		else
+		{
+			fs::path output_path(path);
+			output_path.make_preferred();
+			std::string output_path_str = output_path.string();
+			replace_str(output_path_str, separator, "_@_");
+
+			return output_path_str;
+		}
+	}
+	else if (output_format == EOutputFormat::RECREATE_FOLDER_STRUCTURE)
+	{
+		return std::string(path);
+	}
+	else if (output_format == EOutputFormat::INPLACE)
+	{
+		return std::string(path);
 	}
 
-	return output_path;
+	assert("MakeOutputPath: output_format is invalid!" && false);
+	return "";
 }
 
 EReturnCode ProcessFileImpl(const std::string_view path, const SProgramOptions& program_options)
@@ -181,7 +222,8 @@ EReturnCode ProcessFileImpl(const std::string_view path, const SProgramOptions& 
 					   right_margin, cv::BORDER_CONSTANT, cv::Scalar(0));
 
 	// Figure out the output path
-	const std::string output_path = MakeOutputPath(path, program_options.output_format);
+	const std::string output_path = MakeOutputPath(path, program_options.output_format,
+			program_options.number_of_input_entries);
 
 	// Write the image
 	const bool write_success = cv::imwrite(output_path, image_scaled_padded);
@@ -233,8 +275,9 @@ void ProcessFolder(const fs::path& path, const SProgramOptions& program_options)
 
 		if (fs::is_regular_file(entry))
 		{
-			std::cout << entry << "\n";
-			MakeOutputPath(entry_str, program_options.output_format);
+			std::cout << entry << " " <<
+				MakeOutputPath(entry_str, program_options.output_format,
+						program_options.number_of_input_entries) << "\n";
 			// ProcessFile(entry_str, program_options);
 		}
 		else if (fs::is_directory(entry) && program_options.recursive)
@@ -259,7 +302,9 @@ void ProcessEntries(const std::vector<std::string>& arg_entries,
 		}
 		else if (fs::is_regular_file(entry_path))
 		{
-			std::cout << entry << "\n";
+			std::cout << entry << " " <<
+				MakeOutputPath(entry, program_options.output_format,
+						program_options.number_of_input_entries) << "\n";
 			// ProcessFile(entry, program_options);
 		}
 	}
@@ -287,7 +332,7 @@ int main(int argc, char** argv)
 
 	parser["verbose"]
 		.abbreviation('V')
-		.description("Set verbosity 0(no logs) / 1(only errors) / 2(all).")
+		.description("Set verbosity 0(only fatal errors) / 1(all errors, default) / 2(all).")
 		.bind(program_options.verbose);
 
 	bool valid_output_format_option{ false };
@@ -320,7 +365,7 @@ int main(int argc, char** argv)
 				}
 			});
 
-	parser["output-folder"]
+	po::option& option_output_folder = parser["output-folder"]
 		.abbreviation('O')
 		.description("Specifies the output folder, ignored when --output-format=\"inplace\".")
 		.bind(program_options.output_folder);
@@ -347,12 +392,17 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
+	if (program_options.output_format != EOutputFormat::INPLACE &&
+		(!option_output_folder.available() || program_options.output_folder.empty()))
+	{
+		std::cout << po::error() << "if \'" << po::blue << "output-format";
+		std::cout << "\' is not \"inplace\", user must supply a valid \'" << po::blue << "output-folder";
+		std::cout << "\' option.";
+		return -1;
+	}
+
+	program_options.number_of_input_entries = arg_entries.size();
+
 	// Do the main processing
 	ProcessEntries(arg_entries, program_options);
-
-	std::cout << "\n@\n" << program_options.recursive << "\n";
-	for (const std::string& file : arg_entries)
-	{
-		std::cout << file << "\n";
-	}
 }
