@@ -2,7 +2,29 @@
 #include "dependencies/OpenCV/modules/core/include/opencv2/core/types.hpp"
 #define _ALLOW_COMPILER_AND_STL_VERSION_MISMATCH 1
 #include "ImageResizer.h"
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#elif defined(__GNUC__) || defined(__GNUG__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4244)
+#pragma warning(disable : 4018)
+#endif
+
 #include <ProgramOptions.hxx>
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__) || defined(__GNUG__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+
 #include <cassert>
 #include <iostream>
 #include <vector>
@@ -196,7 +218,7 @@ std::string MakeOutputPath(const std::string_view path, EOutputFormat output_for
 EReturnCode ProcessFileImpl(const std::string_view path, const SProgramOptions& program_options)
 {
 	// Read the file
-	const cv::Mat image = cv::imread(cv::String(path.front(), path.size()));
+	const cv::Mat image = cv::imread(cv::String(path.front(), (uint32_t)path.size()));
 
 	if (!image.data)
 	{
@@ -401,7 +423,7 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
-	program_options.number_of_input_entries = arg_entries.size();
+	program_options.number_of_input_entries = (uint32_t)arg_entries.size();
 
 	// Do the main processing
 	ProcessEntries(arg_entries, program_options);
