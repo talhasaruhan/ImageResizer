@@ -3,6 +3,7 @@ build
 .vs
 .ccls-cache
 .clang-format
+.tasks
 compile_commands.json
 CMakeSettings.json
 ImageResizer/dependencies/OpenCV
