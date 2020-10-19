@@ -178,45 +178,49 @@ std::string MakeOutputPath(const std::string_view path, std::string output_folde
 	if (output_format == EOutputFormat::FLAT_WITH_PREFIXES)
 	{
 		std::string separator = std::string(1, (char)fs::path::preferred_separator);
+		fs::path output_path(path);
+		output_path.make_preferred();
+		std::string output_path_str(output_path.string());
+
 		if (number_of_input_entries == 1)
 		{
-			fs::path output_path(path);
-
 			if (output_path.has_parent_path())
 			{
-				output_path.make_preferred();
-				std::string output_path_str = output_path.string();
-
 				// If there's only one argument, the prefix is going to be common
 				// amongs all the outputs, so remove it
 				output_path_str = output_path_str.substr(
 				    output_path_str.find((char)fs::path::preferred_separator) + 1);
-
-				replace_str(output_path_str, separator, "_@_");
-
-				return (fs::path(output_folder) / fs::path(output_path_str)).string();
-			}
-			else
-			{
-				return (output_folder / output_path).string();
 			}
 		}
-		else
-		{
-			fs::path output_path(path);
-			output_path.make_preferred();
-			std::string output_path_str = output_path.string();
-			replace_str(output_path_str, separator, "_@_");
 
-			return (fs::path(output_folder) / fs::path(output_path_str)).string();
-		}
+		replace_str(output_path_str, separator, "_@_");
+		output_path = fs::path(output_path_str);
+		return (output_folder / output_path).string();
 	}
 	else if (output_format == EOutputFormat::RECREATE_FOLDER_STRUCTURE)
 	{
-		const fs::path input_path(path);
-		fs::path output_directory = output_folder / input_path.parent_path();
-		fs::path output_path = output_folder / input_path;
+		fs::path output_path(path);
+
+		if (number_of_input_entries == 1)
+		{
+			if (output_path.has_parent_path())
+			{
+				output_path.make_preferred();
+				std::string output_path_str(output_path.string());
+				// If there's only one argument, which is a folder
+				// creating that inside output directory is unnecessary
+				output_path_str = output_path_str.substr(
+				    output_path_str.find((char)fs::path::preferred_separator) + 1);
+				output_path = fs::path(output_path_str);
+			}
+		}
+
+		fs::path output_directory = output_folder / output_path.parent_path();
+		output_path = output_folder / output_path;
+
+		// Create the folder structure if needed, otherwise writes will fail
 		fs::create_directories(output_directory);
+
 		return output_path.string();
 	}
 	else if (output_format == EOutputFormat::INPLACE)
