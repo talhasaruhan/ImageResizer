@@ -1,6 +1,4 @@
-﻿#include "dependencies/OpenCV/modules/core/include/opencv2/core/base.hpp"
-#include "dependencies/OpenCV/modules/core/include/opencv2/core/types.hpp"
-#define _ALLOW_COMPILER_AND_STL_VERSION_MISMATCH 1
+﻿#define _ALLOW_COMPILER_AND_STL_VERSION_MISMATCH 1
 #include "ImageResizer.h"
 
 #if defined(__clang__)
@@ -34,7 +32,12 @@
 #include <string>
 #include <string_view>
 #include <filesystem>
+#include <chrono>
+
 #include <opencv2/core.hpp>
+#include <opencv2/core/base.hpp>
+#include <opencv2/core/ocl.hpp>
+#include <opencv2/core/types.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
