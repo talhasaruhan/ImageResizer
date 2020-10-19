@@ -12,11 +12,29 @@
 #pragma warning(disable : 4244)
 #pragma warning(disable : 4018)
 #endif
-
 #define PROGRAMOPTIONS_NO_COLORS
-
 #include <ProgramOptions.hxx>
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__) || defined(__GNUG__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#elif defined(__GNUC__) || defined(__GNUG__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4244)
+#pragma warning(disable : 4267)
+#pragma warning(disable : 4018)
+#endif
+#include <CThreadPool.hpp>
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #elif defined(__GNUC__) || defined(__GNUG__)
@@ -33,6 +51,8 @@
 #include <string_view>
 #include <filesystem>
 #include <chrono>
+#include <future>
+#include <atomic>
 
 #include <opencv2/core.hpp>
 #include <opencv2/core/base.hpp>
@@ -87,6 +107,7 @@ struct SProgramOptions
 	uint32_t target_width{0};
 	uint32_t target_height{0};
 	cv::InterpolationFlags interpolation{};
+	int32_t num_threads{0};
 };
 
 enum class EReturnCode
@@ -318,41 +339,85 @@ EReturnCode ProcessFile(const std::string_view path, const SProgramOptions& prog
 	return err;
 }
 
-void ProcessFolder(const fs::path& path, const SProgramOptions& program_options)
-{
-	for (const fs::path& entry : fs::directory_iterator(path))
-	{
-		const std::string entry_str_ = entry.string();
-		const std::string_view entry_str = entry_str_;
-
-		if (fs::is_regular_file(entry))
-		{
-			ProcessFile(entry_str, program_options);
-		}
-		else if (fs::is_directory(entry) && program_options.recursive)
-		{
-			// It's OK to recurse because it's very unlikely to have a directory
-			// structure that will cause the stack to blow up
-			ProcessFolder(entry_str, program_options);
-		}
-	}
-}
-
 void ProcessEntries(const std::vector<std::string>& arg_entries,
                     const SProgramOptions& program_options)
 {
+	std::vector<fs::path> all_files;
+	std::queue<fs::path> folder_queue;
+
 	for (const std::string& entry : arg_entries)
 	{
 		const fs::path entry_path(entry);
 
 		if (fs::is_directory(entry_path))
 		{
-			ProcessFolder(entry_path, program_options);
+			folder_queue.push(entry_path);
 		}
 		else if (fs::is_regular_file(entry_path))
 		{
-			ProcessFile(entry, program_options);
+			all_files.push_back(entry_path);
 		}
+	}
+
+	while (!folder_queue.empty())
+	{
+		const fs::path& path = folder_queue.front();
+
+		for (const fs::path& entry : fs::directory_iterator(path))
+		{
+			if (fs::is_regular_file(entry))
+			{
+				all_files.push_back(entry);
+			}
+			else if (fs::is_directory(entry) && program_options.recursive)
+			{
+				// It's OK to recurse because it's very unlikely to have a directory
+				// structure that will cause the stack to blow up
+				folder_queue.push(entry);
+			}
+		}
+
+		folder_queue.pop();
+	}
+
+	if (program_options.num_threads == 1)
+	{
+		// Don't spawn any threads if program_options.num_threads == 1
+		for (const fs::path& entry : all_files)
+		{
+			ProcessFile(entry.string(), program_options);
+		}
+	}
+	else
+	{
+		// Send jobs into the job queue and wait for thread pool to finish
+		const int num_jobs = (int)all_files.size();
+		std::atomic<int> received_jobs{0};
+		std::atomic<int> finished_jobs{0};
+
+		const uint32_t num_threads =
+		    (program_options.num_threads > 0 && program_options.num_threads <= 64)
+		        ? program_options.num_threads
+		        : std::thread::hardware_concurrency();
+		nThread::CThreadPool thread_pool(num_threads);
+
+		std::cout << "Spawning " << num_threads << " worker threads!\n";
+
+		for (const fs::path& entry : all_files)
+		{
+			thread_pool.add_and_detach([&entry, &received_jobs, &finished_jobs, num_jobs,
+			                            &program_options = std::as_const(program_options)]() {
+				received_jobs++;
+				ProcessFile(entry.string(), program_options);
+				finished_jobs++;
+			});
+		}
+
+		thread_pool.wait_until_all_usable();
+		thread_pool.join_all();
+
+		assert("Somethings wrong with the thread pool and job queue" &&
+		       finished_jobs == received_jobs && received_jobs == num_jobs);
 	}
 }
 
@@ -454,6 +519,11 @@ int main(int argc, char** argv)
 	        .description("(Required)\nSpecifies the output folder,"
 	                     "ignored when --output-format=\"inplace\".")
 	        .bind(program_options.output_folder);
+
+	parser["num_threads"]
+	    .abbreviation('T')
+	    .description("(Default = All available threads on CPU)\nSet the number of worker threads.")
+	    .bind(program_options.num_threads);
 
 	po::option& help = parser["help"].abbreviation('?').description("Print this help screen");
 

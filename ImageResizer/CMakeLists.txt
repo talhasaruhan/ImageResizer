@@ -9,7 +9,9 @@ include(ExternalProject)
 
 # Add source to this project's executable.
 set(CMAKE_CXX_STANDARD 17)
-add_executable (ImageResizer "ImageResizer.cpp" "ImageResizer.h")
+file(GLOB_RECURSE THREADPOOLSOURCES RELATIVE ${CMAKE_SOURCE_DIR}/ImageResizer "dependencies/ThreadPool/src/*")
+file(GLOB_RECURSE LIBSOURCES RELATIVE ${CMAKE_SOURCE_DIR}/ImageResizer "dependencies/lib/src/*")
+add_executable (ImageResizer "ImageResizer.cpp" "ImageResizer.h" ${THREADPOOLSOURCES} ${LIBSOURCES})
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 include_directories (${CMAKE_BINARY_DIR})
@@ -20,6 +22,11 @@ if(MSVC)
 endif()
 
 target_link_libraries(ImageResizer opencv_core opencv_imgcodecs)
+
+target_include_directories(ImageResizer PUBLIC 
+    dependencies/ThreadPool/header)
+target_include_directories(ImageResizer PUBLIC 
+    dependencies/lib/header)
 
 target_include_directories(ImageResizer PUBLIC 
     dependencies/opencv/modules/calib3d/include
