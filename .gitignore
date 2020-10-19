@@ -6,4 +6,3 @@ build
 .tasks
 compile_commands.json
 CMakeSettings.json
-ImageResizer/dependencies/OpenCV

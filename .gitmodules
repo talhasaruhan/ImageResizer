@@ -1,0 +1,3 @@
+[submodule "ImageResizer/dependencies/OpenCV"]
+	path = ImageResizer/dependencies/OpenCV
+	url = https://github.com/opencv/opencv.git
