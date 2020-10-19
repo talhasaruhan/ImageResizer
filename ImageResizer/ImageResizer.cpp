@@ -15,6 +15,8 @@
 #pragma warning(disable : 4018)
 #endif
 
+#define PROGRAMOPTIONS_NO_COLORS
+
 #include <ProgramOptions.hxx>
 
 #if defined(__clang__)
@@ -360,7 +362,10 @@ int main(int argc, char** argv)
 	SProgramOptions program_options{};
 
 	std::vector<std::string> arg_entries;
-	parser[""].bind(arg_entries).description("Each argument can be a file or a folder");
+	parser[""]
+	    .bind(arg_entries)
+	    .description("Multiple arguments are allowed. "
+	                 "Each argument can be a file or a folder");
 
 	parser["recursive"]
 	    .abbreviation('R')

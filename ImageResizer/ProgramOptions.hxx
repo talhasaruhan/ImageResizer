@@ -2233,6 +2233,17 @@ namespace po {
 					stream << "s...";
 				stream << ']';
 			}
+
+			{
+				for (const auto& option : m_order)
+				{
+					if (option->first.empty())
+					{
+						stream << "\n\nArguments:\n  " << option->second.get_description();
+					}
+				}
+			}
+
 			stream << "\n\nAvailable options:\n\n";
 			bool any_abbreviations = false;
 			std::size_t max_verbose = 0;
