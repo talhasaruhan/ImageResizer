@@ -10,7 +10,8 @@ Available options:
                                Recursively visit sub-folders.
 
     -V, --verbose              (Default = 1)
-                               Set verbosity0(only fatal errors) / 1(all errors, default) / 2(all).
+                               Set verbosity
+                               0(only fatal errors) / 1(all errors, default) / 2(all).
 
     -K, --keep-aspect-ratio    (Default = off)
                                If set, keeps aspect ratio of the original image and adds black bor-

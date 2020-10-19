@@ -375,7 +375,7 @@ int main(int argc, char** argv)
 	parser["verbose"]
 	    .abbreviation('V')
 	    .description("(Default = 1)\nSet verbosity"
-	                 "0(only fatal errors) / 1(all errors, default) / 2(all).")
+	                 "\n0(only fatal errors) / 1(all errors, default) / 2(all).")
 	    .bind(program_options.verbose);
 
 	parser["keep-aspect-ratio"]
