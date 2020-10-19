@@ -73,7 +73,7 @@ struct SProgramOptions
 {
 	uint32_t number_of_input_entries{0};
 	EOutputFormat output_format{EOutputFormat::INPLACE};
-	std::string output_folder{"resized_images"}; // Relevant only if output_format is not INPLACE
+	std::string output_folder{""}; // Relevant only if output_format is not INPLACE
 	uint32_t recursive{0};
 	uint32_t verbose{1}; // 0: no logs, 1: errors, 2: errors, warnings and info
 	// keep_aspect_ratio: If 1, then original aspect ratios are kept and
@@ -81,6 +81,7 @@ struct SProgramOptions
 	uint32_t keep_aspect_ratio{0};
 	uint32_t target_width{0};
 	uint32_t target_height{0};
+	cv::InterpolationFlags interpolation{};
 };
 
 enum class EReturnCode
@@ -157,17 +158,17 @@ cv::Size FitAspectRatio(int org_width, int org_height, int target_width, int tar
 	return real_size;
 }
 
-std::string replace_str(std::string & str, const std::string& from, const std::string& to)
+std::string replace_str(std::string& str, const std::string& from, const std::string& to)
 {
-	while(str.find(from) != std::string::npos)
+	while (str.find(from) != std::string::npos)
 	{
 		str.replace(str.find(from), from.length(), to);
 	}
 	return str;
 }
 
-std::string MakeOutputPath(const std::string_view path, EOutputFormat output_format,
-		uint32_t number_of_input_entries)
+std::string MakeOutputPath(const std::string_view path, std::string output_folder,
+                           EOutputFormat output_format, uint32_t number_of_input_entries)
 {
 	if (output_format == EOutputFormat::FLAT_WITH_PREFIXES)
 	{
@@ -181,15 +182,18 @@ std::string MakeOutputPath(const std::string_view path, EOutputFormat output_for
 				output_path.make_preferred();
 				std::string output_path_str = output_path.string();
 
+				// If there's only one argument, the prefix is going to be common
+				// amongs all the outputs, so remove it
 				output_path_str = output_path_str.substr(
-						output_path_str.find((char)fs::path::preferred_separator)+1);
+				    output_path_str.find((char)fs::path::preferred_separator) + 1);
+
 				replace_str(output_path_str, separator, "_@_");
 
-				return output_path_str;
+				return (fs::path(output_folder) / fs::path(output_path_str)).string();
 			}
 			else
 			{
-				return output_path.filename().string();
+				return (output_folder / output_path).string();
 			}
 		}
 		else
@@ -199,12 +203,16 @@ std::string MakeOutputPath(const std::string_view path, EOutputFormat output_for
 			std::string output_path_str = output_path.string();
 			replace_str(output_path_str, separator, "_@_");
 
-			return output_path_str;
+			return (fs::path(output_folder) / fs::path(output_path_str)).string();
 		}
 	}
 	else if (output_format == EOutputFormat::RECREATE_FOLDER_STRUCTURE)
 	{
-		return std::string(path);
+		const fs::path input_path(path);
+		fs::path output_directory = output_folder / input_path.parent_path();
+		fs::path output_path = output_folder / input_path;
+		fs::create_directories(output_directory);
+		return output_path.string();
 	}
 	else if (output_format == EOutputFormat::INPLACE)
 	{
@@ -218,37 +226,50 @@ std::string MakeOutputPath(const std::string_view path, EOutputFormat output_for
 EReturnCode ProcessFileImpl(const std::string_view path, const SProgramOptions& program_options)
 {
 	// Read the file
-	const cv::Mat image = cv::imread(cv::String(path.front(), (uint32_t)path.size()));
+	cv::String path_ = cv::String(std::string(path));
+	const cv::Mat image = cv::imread(path_);
 
 	if (!image.data)
 	{
 		return EReturnCode::FILE_READ_ERROR;
 	}
 
-	cv::Size real_size = FitAspectRatio(image.cols, image.rows, program_options.target_width,
-										program_options.target_height);
+	cv::Mat image_final;
 
-	// Calculate padding
-	const int top_margin = (program_options.target_height - real_size.height) / 2;
-	const int bottom_margin = program_options.target_height - real_size.height - top_margin;
-	const int left_margin = (program_options.target_width - real_size.width) / 2;
-	const int right_margin = program_options.target_width - real_size.width - left_margin;
+	if (program_options.keep_aspect_ratio)
+	{
+		cv::Size real_size = FitAspectRatio(image.cols, image.rows, program_options.target_width,
+		                                    program_options.target_height);
 
-	// Resize the image
-	cv::Mat image_scaled;
-	cv::resize(image, image_scaled, cv::Size(real_size.width, real_size.height));
+		// Calculate padding
+		const int top_margin = (program_options.target_height - real_size.height) / 2;
+		const int bottom_margin = program_options.target_height - real_size.height - top_margin;
+		const int left_margin = (program_options.target_width - real_size.width) / 2;
+		const int right_margin = program_options.target_width - real_size.width - left_margin;
 
-	// Add padding
-	cv::Mat image_scaled_padded;
-	cv::copyMakeBorder(image_scaled, image_scaled_padded, top_margin, bottom_margin, left_margin,
-					   right_margin, cv::BORDER_CONSTANT, cv::Scalar(0));
+		// Resize the image
+		cv::Mat image_scaled;
+		cv::resize(image, image_scaled, cv::Size(real_size.width, real_size.height), 0, 0,
+		           program_options.interpolation);
+
+		// Add padding
+		cv::copyMakeBorder(image_scaled, image_final, top_margin, bottom_margin, left_margin,
+		                   right_margin, cv::BORDER_CONSTANT, cv::Scalar(0));
+	}
+	else
+	{
+		cv::resize(image, image_final,
+		           cv::Size(program_options.target_width, program_options.target_height), 0, 0,
+		           program_options.interpolation);
+	}
 
 	// Figure out the output path
-	const std::string output_path = MakeOutputPath(path, program_options.output_format,
-			program_options.number_of_input_entries);
+	const std::string output_path =
+	    MakeOutputPath(path, program_options.output_folder, program_options.output_format,
+	                   program_options.number_of_input_entries);
 
 	// Write the image
-	const bool write_success = cv::imwrite(output_path, image_scaled_padded);
+	const bool write_success = cv::imwrite(output_path, image_final);
 
 	if (!write_success)
 	{
@@ -297,10 +318,7 @@ void ProcessFolder(const fs::path& path, const SProgramOptions& program_options)
 
 		if (fs::is_regular_file(entry))
 		{
-			std::cout << entry << " " <<
-				MakeOutputPath(entry_str, program_options.output_format,
-						program_options.number_of_input_entries) << "\n";
-			// ProcessFile(entry_str, program_options);
+			ProcessFile(entry_str, program_options);
 		}
 		else if (fs::is_directory(entry) && program_options.recursive)
 		{
@@ -312,7 +330,7 @@ void ProcessFolder(const fs::path& path, const SProgramOptions& program_options)
 }
 
 void ProcessEntries(const std::vector<std::string>& arg_entries,
-					const SProgramOptions& program_options)
+                    const SProgramOptions& program_options)
 {
 	for (const std::string& entry : arg_entries)
 	{
@@ -324,10 +342,7 @@ void ProcessEntries(const std::vector<std::string>& arg_entries,
 		}
 		else if (fs::is_regular_file(entry_path))
 		{
-			std::cout << entry << " " <<
-				MakeOutputPath(entry, program_options.output_format,
-						program_options.number_of_input_entries) << "\n";
-			// ProcessFile(entry, program_options);
+			ProcessFile(entry, program_options);
 		}
 	}
 }
@@ -342,55 +357,91 @@ int main(int argc, char** argv)
 
 	// Set-up the parser
 	po::parser parser;
-	SProgramOptions program_options;
+	SProgramOptions program_options{};
 
 	std::vector<std::string> arg_entries;
 	parser[""].bind(arg_entries).description("Each argument can be a file or a folder");
 
 	parser["recursive"]
-		.abbreviation('R')
-		.description("Recursively visit sub-folders.")
-		.callback([&program_options]() { program_options.recursive = 1; });
+	    .abbreviation('R')
+	    .description("(Default = off)\nRecursively visit sub-folders.")
+	    .callback([&program_options]() { program_options.recursive = 1; });
 
 	parser["verbose"]
-		.abbreviation('V')
-		.description("Set verbosity 0(only fatal errors) / 1(all errors, default) / 2(all).")
-		.bind(program_options.verbose);
+	    .abbreviation('V')
+	    .description("(Default = 1)\nSet verbosity"
+	                 "0(only fatal errors) / 1(all errors, default) / 2(all).")
+	    .bind(program_options.verbose);
 
-	bool valid_output_format_option{ false };
+	parser["keep-aspect-ratio"]
+	    .abbreviation('K')
+	    .description(
+	        "(Default = off)\nIf set, keeps aspect ratio of the original image "
+	        "and adds black borders around the image to make it (target-width, target-height).")
+	    .callback([&program_options]() { program_options.keep_aspect_ratio = 1; });
+
+	po::option& target_width = parser["target_width"]
+	                               .abbreviation('W')
+	                               .description("(Required)\nTarget width.")
+	                               .bind(program_options.target_width);
+
+	po::option& target_height = parser["target_height"]
+	                                .abbreviation('H')
+	                                .description("(Required)\nTarget height.")
+	                                .bind(program_options.target_height);
+
+	std::string interpolation_str;
+	parser["interpolation"]
+	    .abbreviation('I')
+	    .description("(Default = \"cubic\")\n"
+	                 "Changes the method used to resize images,"
+	                 "\n\"nn\"       : very fast, very low quality"
+	                 "\n\"linear\"   : fast, low-medium quality"
+	                 "\n\"cubic\"    : slow, high quality"
+	                 "\n\"area\"     : slow, high quality"
+	                 "\n\"lanczos4\" : very slow, high quality")
+	    .bind(interpolation_str)
+	    .fallback("cubic");
+
+	bool valid_output_format_option{false};
 	std::string option_output_format_str;
 	po::option& option_output_format =
-		parser["output-format"]
-			.abbreviation('F')
-			.description("\"inplace\": overwrite original images.\n\n"
-						 "\"flat\":All the images will be put under the output directory "
-						 "specified by --output-folder with the naming schema: "
-						 "%folder_name%_%image_name%.\n\n"
-						 "\"mirror\": input folder structure is recreated in the "
-						 "output directory specified by --output-folder.")
-			.bind(option_output_format_str)
-			.callback([&program_options, &valid_output_format_option](const std::string& output_format) {
-				if (output_format == "inplace")
-				{
-					valid_output_format_option = true;
-					program_options.output_format = EOutputFormat::INPLACE;
-				}
-				else if (output_format == "flat")
-				{
-					valid_output_format_option = true;
-					program_options.output_format = EOutputFormat::FLAT_WITH_PREFIXES;
-				}
-				else if (output_format == "mirror")
-				{
-					valid_output_format_option = true;
-					program_options.output_format = EOutputFormat::RECREATE_FOLDER_STRUCTURE;
-				}
-			});
+	    parser["output-format"]
+	        .abbreviation('F')
+	        .description("(Required)\n"
+	                     "Changes how the processed images are saved to disk,"
+	                     "\n\"inplace\" : overwrite original images."
+	                     "\n\"flat\"    : all the images will be put under the output directory "
+	                     "specified by --output-folder with the naming schema: "
+	                     "%folder%_%image%."
+	                     "\n\"mirror\"  : input folder structure is recreated in the "
+	                     "output directory specified by --output-folder.")
+	        .bind(option_output_format_str)
+	        .callback(
+	            [&program_options, &valid_output_format_option](const std::string& output_format) {
+		            if (output_format == "inplace")
+		            {
+			            valid_output_format_option = true;
+			            program_options.output_format = EOutputFormat::INPLACE;
+		            }
+		            else if (output_format == "flat")
+		            {
+			            valid_output_format_option = true;
+			            program_options.output_format = EOutputFormat::FLAT_WITH_PREFIXES;
+		            }
+		            else if (output_format == "mirror")
+		            {
+			            valid_output_format_option = true;
+			            program_options.output_format = EOutputFormat::RECREATE_FOLDER_STRUCTURE;
+		            }
+	            });
 
-	po::option& option_output_folder = parser["output-folder"]
-		.abbreviation('O')
-		.description("Specifies the output folder, ignored when --output-format=\"inplace\".")
-		.bind(program_options.output_folder);
+	po::option& option_output_folder =
+	    parser["output-folder"]
+	        .abbreviation('O')
+	        .description("(Required)\nSpecifies the output folder,"
+	                     "ignored when --output-format=\"inplace\".")
+	        .bind(program_options.output_folder);
 
 	po::option& help = parser["help"].abbreviation('?').description("Print this help screen");
 
@@ -403,10 +454,52 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
+	// Check target_width & target_height arguments
+	if (!target_width.available() || !target_height.available())
+	{
+		std::cout << po::error() << "\'" << po::blue << "target-width";
+		std::cout << "\' and \'" << po::blue << "target_width";
+		std::cout << "\' has to be set!";
+		return -1;
+	}
+
+	// Parse interpolation argument
+	{
+		if (interpolation_str == "cubic")
+		{
+			program_options.interpolation = cv::InterpolationFlags::INTER_CUBIC;
+		}
+		else if (interpolation_str == "linear")
+		{
+			program_options.interpolation = cv::InterpolationFlags::INTER_LINEAR;
+		}
+		else if (interpolation_str == "nn")
+		{
+			program_options.interpolation = cv::InterpolationFlags::INTER_NEAREST;
+		}
+		else if (interpolation_str == "area")
+		{
+			program_options.interpolation = cv::InterpolationFlags::INTER_AREA;
+		}
+		else if (interpolation_str == "lanczos4")
+		{
+			program_options.interpolation = cv::InterpolationFlags::INTER_LANCZOS4;
+		}
+		else
+		{
+			std::cout << po::error() << "\'" << po::blue << "interpolation";
+			std::cout << "\' must be one of \"nn\", \"linear\", \"cubic\", \"area\" or "
+			             "\"lanczos4\".\n";
+			return -1;
+		}
+	}
+
+	// Check output_format argument
 	if (!valid_output_format_option)
 	{
 		std::cout << po::error() << "\'" << po::blue << "output-format";
-		std::cout << "\' must be one of \"inplace\", \"flat\" or " "\"mirror\".\n";
+		std::cout << "\' must be one of \"inplace\", \"flat\" or "
+		             "\"mirror\".\n";
 		if (option_output_format.available())
 		{
 			std::cout << "Instead, got \"" << option_output_format_str << "\"\n";
@@ -414,13 +507,31 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
-	if (program_options.output_format != EOutputFormat::INPLACE &&
-		(!option_output_folder.available() || program_options.output_folder.empty()))
+	// Check output_folder argument
+	if (program_options.output_format != EOutputFormat::INPLACE)
 	{
-		std::cout << po::error() << "if \'" << po::blue << "output-format";
-		std::cout << "\' is not \"inplace\", user must supply a valid \'" << po::blue << "output-folder";
-		std::cout << "\' option.";
-		return -1;
+		if (!option_output_folder.available() || program_options.output_folder.empty())
+		{
+			std::cout << po::error() << "if \'" << po::blue << "output-format";
+			std::cout << "\' is not \"inplace\", user must supply a valid \'" << po::blue
+			          << "output-folder";
+			std::cout << "\' option.";
+			return -1;
+		}
+		else
+		{
+			// Make sure output folder exists
+			if (fs::is_directory(program_options.output_folder))
+			{
+				std::cout << "Output folder " << program_options.output_folder
+				          << " already exists.\n";
+			}
+			else
+			{
+				std::cout << "Creating output folder " << program_options.output_folder << "\n";
+				fs::create_directories(program_options.output_folder);
+			}
+		}
 	}
 
 	program_options.number_of_input_entries = (uint32_t)arg_entries.size();
