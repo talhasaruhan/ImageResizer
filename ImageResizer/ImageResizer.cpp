@@ -371,8 +371,6 @@ void ProcessEntries(const std::vector<std::string>& arg_entries,
 			}
 			else if (fs::is_directory(entry) && program_options.recursive)
 			{
-				// It's OK to recurse because it's very unlikely to have a directory
-				// structure that will cause the stack to blow up
 				folder_queue.push(entry);
 			}
 		}
