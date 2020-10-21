@@ -119,33 +119,50 @@ enum class EReturnCode
 	UNKNOWN_ERROR,
 };
 
-void LogReturnCode(EReturnCode err, uint32_t verbose)
+struct SReturnStatus
+{
+	EReturnCode return_code{EReturnCode::UNKNOWN_ERROR};
+	union
+	{
+		char write_fail_dest[1024]{};
+		char file_ext[1024];
+	};
+};
+
+void LogReturnStatus(const std::string_view entry, SReturnStatus status, uint32_t verbose,
+                     std::ostream& stream = std::cout)
 {
 	if (!verbose)
 	{
 		return;
 	}
 
-	switch (err)
+	switch (status.return_code)
 	{
 	case EReturnCode::OK:
-		std::cout << "OK\n";
+		if (verbose > 1)
+		{
+			stream << "OK: " << entry << "\n";
+		}
 		break;
 	case EReturnCode::FILE_UNKNOWN_EXTENSION:
 		if (verbose > 1)
 		{
-			std::cout << "File extension unknown (), skipping file:!\n";
-			break;
+			stream << "File extension: \"" << status.file_ext << "\" is unknown, skipping file: \""
+			       << entry << "\"\n";
 		}
+		break;
 	case EReturnCode::FILE_READ_ERROR:
-		std::cout << "ERROR: cannot read file:!\n";
+		stream << "ERROR: cannot read the file: \"" << entry << "\"\n";
 		break;
 	case EReturnCode::FILE_WRITE_ERROR:
-		std::cout << "ERROR: cannot write file (source: , destination: )!\n";
+		stream << "ERROR: cannot write the output to: \"" << status.write_fail_dest
+		       << "\", skipping file: \"" << entry << "\"\n";
+		break;
 		break;
 	case EReturnCode::UNKNOWN_ERROR:
 	default:
-		std::cout << "ERROR: unknown error!\n";
+		stream << "ERROR: unknown error at file: \"" << entry << "\"\n";
 		break;
 	}
 }
@@ -253,15 +270,18 @@ std::string MakeOutputPath(const std::string_view path, std::string output_folde
 	return "";
 }
 
-EReturnCode ProcessFileImpl(const std::string_view path, const SProgramOptions& program_options)
+SReturnStatus ProcessFileImpl(const std::string_view path, const SProgramOptions& program_options)
 {
+	SReturnStatus status;
+
 	// Read the file
 	cv::String path_ = cv::String(std::string(path));
 	const cv::Mat image = cv::imread(path_);
 
 	if (!image.data)
 	{
-		return EReturnCode::FILE_READ_ERROR;
+		status.return_code = EReturnCode::FILE_READ_ERROR;
+		return status;
 	}
 
 	cv::Mat image_final;
@@ -303,40 +323,45 @@ EReturnCode ProcessFileImpl(const std::string_view path, const SProgramOptions& 
 
 	if (!write_success)
 	{
-		return EReturnCode::FILE_WRITE_ERROR;
+		status.return_code = EReturnCode::FILE_WRITE_ERROR;
+		snprintf(status.write_fail_dest, sizeof(status.write_fail_dest), "%s",
+		         output_path.c_str());
+		return status;
 	}
 
-	return EReturnCode::OK;
+	status.return_code = EReturnCode::OK;
+	return status;
 }
 
-EReturnCode ProcessFile(const std::string_view path, const SProgramOptions& program_options)
+SReturnStatus ProcessFile(const std::string_view path, const SProgramOptions& program_options)
 {
-	const fs::path extension = fs::path(path).extension();
-	ExtLookup::iterator ext_lut_it = g_ext_lookup_table.find(extension.string());
+	const std::string extension = fs::path(path).extension().string();
+	ExtLookup::iterator ext_lut_it = g_ext_lookup_table.find(extension);
 
 	if (ext_lut_it == g_ext_lookup_table.end())
 	{
-		return EReturnCode::FILE_UNKNOWN_EXTENSION;
+		SReturnStatus status{};
+		status.return_code = EReturnCode::FILE_UNKNOWN_EXTENSION;
+		snprintf(status.write_fail_dest, sizeof(status.write_fail_dest), "%s", extension.c_str());
+		return status;
 	}
-
-	EReturnCode err{EReturnCode::UNKNOWN_ERROR};
 
 	switch (ext_lut_it->second)
 	{
 	// Fallthrough
 	case EFileType::IMAGE_JPEG:
 	case EFileType::IMAGE_PNG:
-		err = ProcessFileImpl(path, program_options);
+		return ProcessFileImpl(path, program_options);
 		break;
 	case EFileType::OTHER:
 	default:
-		err = EReturnCode::FILE_UNKNOWN_EXTENSION;
+		SReturnStatus status{};
+		status.return_code = EReturnCode::UNKNOWN_ERROR;
+		return status;
 		break;
 	}
 
-	LogReturnCode(err, program_options.verbose);
-
-	return err;
+	return {};
 }
 
 void ProcessEntries(const std::vector<std::string>& arg_entries,
@@ -383,7 +408,9 @@ void ProcessEntries(const std::vector<std::string>& arg_entries,
 		// Don't spawn any threads if program_options.num_threads == 1
 		for (const fs::path& entry : all_files)
 		{
-			ProcessFile(entry.string(), program_options);
+			const std::string entry_str = entry.string();
+			SReturnStatus status = ProcessFile(entry_str, program_options);
+			LogReturnStatus(entry_str, status, program_options.verbose);
 		}
 	}
 	else
@@ -406,7 +433,9 @@ void ProcessEntries(const std::vector<std::string>& arg_entries,
 			thread_pool.add_and_detach([&entry, &received_jobs, &finished_jobs, num_jobs,
 			                            &program_options = std::as_const(program_options)]() {
 				received_jobs++;
-				ProcessFile(entry.string(), program_options);
+				const std::string entry_str = entry.string();
+				SReturnStatus status = ProcessFile(entry_str, program_options);
+				LogReturnStatus(entry_str, status, program_options.verbose);
 				finished_jobs++;
 			});
 		}
@@ -418,6 +447,33 @@ void ProcessEntries(const std::vector<std::string>& arg_entries,
 		       finished_jobs == received_jobs && received_jobs == num_jobs);
 	}
 }
+
+// Manual testing functions
+namespace testf
+{
+void TestLogReturnStatus()
+{
+	std::string entry = "test_entry";
+	SReturnStatus status{};
+
+	status.return_code = EReturnCode::OK;
+	LogReturnStatus(entry, status, 2);
+
+	snprintf(status.file_ext, sizeof(status.file_ext), ".ext");
+	status.return_code = EReturnCode::FILE_UNKNOWN_EXTENSION;
+	LogReturnStatus(entry, status, 2);
+
+	status.return_code = EReturnCode::FILE_READ_ERROR;
+	LogReturnStatus(entry, status, 2);
+
+	snprintf(status.write_fail_dest, sizeof(status.write_fail_dest), "failed_dest");
+	status.return_code = EReturnCode::FILE_WRITE_ERROR;
+	LogReturnStatus(entry, status, 2);
+
+	status.return_code = EReturnCode::UNKNOWN_ERROR;
+	LogReturnStatus(entry, status, 2);
+}
+}; // namespace testf
 
 int main(int argc, char** argv)
 {
